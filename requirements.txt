@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pyodbc
+python-dotenv
+jamo
+pydantic
+hgtk
+six
+pyahocorasick

@@ -3,6 +3,7 @@
 🗂️ 테이블 생성 스크립트 (MSSQL)
 
 -- 민감 단어 테이블
+
 CREATE TABLE sensitive_words (
     word_id INT IDENTITY(1,1) PRIMARY KEY,
     word NVARCHAR(255) NOT NULL,
@@ -12,6 +13,7 @@ CREATE TABLE sensitive_words (
 );
 
 -- 사용자별 민감 단어 연결 테이블
+
 CREATE TABLE user_sensitive_words (
     user_id NVARCHAR(100) NOT NULL,
     word_id INT NOT NULL,
@@ -20,6 +22,7 @@ CREATE TABLE user_sensitive_words (
 );
 
 -- 금칙어 테이블
+
 CREATE TABLE forbidden_words (
     id INT IDENTITY(1,1) PRIMARY KEY,
     word NVARCHAR(255) NOT NULL,

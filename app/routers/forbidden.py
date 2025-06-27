@@ -3,9 +3,14 @@ from app.database import get_connection
 from app.filter_utils.forbidden_utils import (
     prepare_forbidden_entry, 
     prepare_forbidden_entries,
-    add_to_automaton
+    add_to_automaton,
+    check_forbidden_message
 )
-from app.schemas.forbidden_schema import ForbiddenWord, ForbiddenWordList
+from app.schemas.forbidden_schema import (
+    ForbiddenWord, 
+    ForbiddenWordList,
+    MessageInput
+)
 
 router = APIRouter()
 
@@ -129,3 +134,8 @@ def get_existing_words(conn, words: list[str]) -> set[str]:
         WHERE word IN ({placeholders})
     """, words)
     return set(row[0] for row in cursor.fetchall())
+
+
+@router.post("/check-message")
+def check_message(data: MessageInput):
+    return check_forbidden_message(data.message)

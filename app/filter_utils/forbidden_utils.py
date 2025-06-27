@@ -1,9 +1,13 @@
 # app/filter_utils/forbidden_utils.py
 
 import hgtk
+import time
 import ahocorasick
 from app.database import get_connection
 import app.state as state
+from konlpy.tag import Okt
+
+okt = Okt()
 
 exclude_for_jamo = set()
 
@@ -88,3 +92,51 @@ def add_to_automaton(word: str, decomposed: str):
 
     # 꼭 다시 빌드해야 함 (ahocorasick는 build 이후에만 탐색 가능)
     state.forbidden_automaton.make_automaton()
+
+
+def extract_meaningful_tokens(message: str) -> list[str]:
+    """형태소 분석 후 명사 + 핵심 단어만 추출"""
+    tokens = okt.pos(message, norm=True, stem=True)
+    return [token for token, pos in tokens if pos == 'Noun']
+
+def check_forbidden_message(message: str) -> dict:
+    """메시지 한 개에 대해 금칙어 포함 여부 검사 (형태소 기반 단어만 검사)"""
+    start_time = time.time()
+    automaton = state.forbidden_automaton
+    decomposed = decompose_text(message)
+
+    meaningful_tokens = set(extract_meaningful_tokens(message))
+
+    # 1차: 원형 검사
+    for _, (word, mode) in automaton.iter(message):
+        if mode == "original" and word in meaningful_tokens:
+            elapsed = time.time() - start_time
+            return {
+                "message": message,
+                "result": "🚫 금칙어 포함",
+                "detected_words": [word],
+                "method": "원형",
+                "elapsed": round(elapsed, 4)
+            }
+
+    # 2차: 자모 검사
+    for _, (word, mode) in automaton.iter(decomposed):
+        if mode == "decomposed" and word in meaningful_tokens:
+            elapsed = time.time() - start_time
+            return {
+                "message": message,
+                "result": "🚫 금칙어 포함",
+                "detected_words": [word],
+                "method": "자모",
+                "elapsed": round(elapsed, 4)
+            }
+
+    # 통과
+    elapsed = time.time() - start_time
+    return {
+        "message": message,
+        "result": "✅ 통과",
+        "detected_words": [],
+        "method": "-",
+        "elapsed": round(elapsed, 4)
+    }

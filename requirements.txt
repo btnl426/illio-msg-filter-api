@@ -7,3 +7,5 @@ pydantic
 hgtk
 six
 pyahocorasick
+# konlpy
+mecab-python3

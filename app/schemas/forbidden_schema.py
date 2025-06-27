@@ -7,3 +7,6 @@ class ForbiddenWord(BaseModel):
 
 class ForbiddenWordList(BaseModel):
     words: List[str]
+    
+class MessageInput(BaseModel):
+    message: str

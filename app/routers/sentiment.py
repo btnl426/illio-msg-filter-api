@@ -1,10 +1,20 @@
 # app/routers/sentiment.py
 
 from fastapi import APIRouter
+from app.filter_utils.sentiment_utils import predict_sentiment
+from app.schemas.sentiment_schema import (
+    SentimentRequest,
+    SentimentResponse
+)
 
 router = APIRouter()
 
-@router.post("/analyze")
-def analyze_sentiment(text: str):
-    # 실제 감성 분석 로직 연결 예정
-    return {"message": "감성 분석 결과 예시", "text": text}
+@router.post("/analyze", response_model=SentimentResponse)
+def analyze_sentiment(request: SentimentRequest):
+    sentiment = predict_sentiment(request.message)
+    return SentimentResponse(
+        message=request.message,
+        sentiment=sentiment["label"],
+        confidence=sentiment["confidence"],
+        elapsed=sentiment["elapsed"]
+    )

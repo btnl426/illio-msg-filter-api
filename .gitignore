@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+models/embedding_models/jhgan_ko-sbert-multitask/model.safetensors

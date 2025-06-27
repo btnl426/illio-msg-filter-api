@@ -9,6 +9,7 @@ from app.schemas.sentiment_schema import (
 
 router = APIRouter()
 
+# sentiment 분석을 위한 라우터
 @router.post("/analyze", response_model=SentimentResponse)
 def analyze_sentiment(request: SentimentRequest):
     sentiment = predict_sentiment(request.message)

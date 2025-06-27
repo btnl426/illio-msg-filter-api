@@ -140,3 +140,21 @@ def check_forbidden_message(message: str) -> dict:
         "method": "-",
         "elapsed": round(elapsed, 4)
     }
+    
+    
+def delete_forbidden_word(word: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("DELETE FROM forbidden_words WHERE word = ?", (word,))
+        conn.commit()
+        return cursor.rowcount > 0  # 삭제된 행이 있으면 True
+
+    except Exception as e:
+        conn.rollback()
+        print("❌ 삭제 에러:", e)
+        return False
+
+    finally:
+        conn.close()

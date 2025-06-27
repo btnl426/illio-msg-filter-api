@@ -4,7 +4,8 @@ from app.filter_utils.forbidden_utils import (
     prepare_forbidden_entry, 
     prepare_forbidden_entries,
     add_to_automaton,
-    check_forbidden_message
+    check_forbidden_message,
+    delete_forbidden_word
 )
 from app.schemas.forbidden_schema import (
     ForbiddenWord, 
@@ -139,3 +140,12 @@ def get_existing_words(conn, words: list[str]) -> set[str]:
 @router.post("/check-message")
 def check_message(data: MessageInput):
     return check_forbidden_message(data.message)
+
+
+@router.delete("/forbidden/{word}")
+def remove_forbidden_word(word: str):
+    success = delete_forbidden_word(word)
+    if success:
+        return {"status": "success", "message": f"'{word}' 삭제 완료"}
+    else:
+        return {"status": "failed", "message": f"'{word}' 삭제 실패 또는 존재하지 않음"}

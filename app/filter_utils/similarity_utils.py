@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import time
+import os
 
 from datetime import datetime
 from app.database import get_connection
@@ -10,12 +11,13 @@ from transformers import AutoTokenizer, AutoModel
 
 
 # 사전 로딩
-MODEL_PATH = "models/embedding_models/jhgan_ko-sbert-multitask"
-# 모델 경로에서 이름만 추출
-model_name = MODEL_PATH.split("/")[-1]
+embedding_model_path = os.getenv("EMBEDDING_MODEL_PATH")
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-model = AutoModel.from_pretrained(MODEL_PATH)
+# 모델 경로에서 이름만 추출
+model_name = embedding_model_path.split("/")[-1]
+
+tokenizer = AutoTokenizer.from_pretrained(embedding_model_path)
+model = AutoModel.from_pretrained(embedding_model_path)
 
 def get_sentence_embedding(model, tokenizer, sentence):
     inputs = tokenizer(sentence, return_tensors="pt", truncation=True, padding=True)

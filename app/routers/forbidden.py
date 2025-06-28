@@ -142,7 +142,7 @@ def check_message(data: MessageInput):
     return check_forbidden_message(data.message)
 
 
-@router.delete("/forbidden/{word}")
+@router.delete("/{word}")
 def remove_forbidden_word(word: str):
     success = delete_forbidden_word(word)
     if success:

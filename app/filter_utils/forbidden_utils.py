@@ -5,9 +5,13 @@ import time
 import ahocorasick
 from app.database import get_connection
 import app.state as state
-from konlpy.tag import Okt
 
+from konlpy.tag import Okt
 okt = Okt()
+
+from konlpy.tag import Mecab
+# mecab = Mecab()
+mecab = Mecab(dicpath="/opt/homebrew/Cellar/mecab-ko-dic/2.1.1-20180720/lib/mecab/dic/mecab-ko-dic")
 
 exclude_for_jamo = set()
 
@@ -93,11 +97,19 @@ def add_to_automaton(word: str, decomposed: str):
     # 꼭 다시 빌드해야 함 (ahocorasick는 build 이후에만 탐색 가능)
     state.forbidden_automaton.make_automaton()
 
+ALLOWED_POS_PREFIXES = ('N', 'V', 'M', 'VA', 'XR', 'IC')  # 명사, 동사, 부사, 형용사, 어근, 감탄사
 
 def extract_meaningful_tokens(message: str) -> list[str]:
-    """형태소 분석 후 명사 + 핵심 단어만 추출"""
-    tokens = okt.pos(message, norm=True, stem=True)
-    return [token for token, pos in tokens if pos == 'Noun']
+    tokens = mecab.pos(message)
+    return [token for token, pos in tokens if not pos.startswith('J') and pos.startswith(ALLOWED_POS_PREFIXES)]
+
+def generate_ngrams(tokens: list[str], n_range=(2, 3)) -> set[str]:
+    ngram_set = set()
+    for n in range(n_range[0], n_range[1]+1):
+        for i in range(len(tokens) - n + 1):
+            ngram = ''.join(tokens[i:i+n])
+            ngram_set.add(ngram)
+    return ngram_set
 
 def check_forbidden_message(message: str) -> dict:
     """메시지 한 개에 대해 금칙어 포함 여부 검사 (형태소 기반 단어만 검사)"""
@@ -105,7 +117,11 @@ def check_forbidden_message(message: str) -> dict:
     automaton = state.forbidden_automaton
     decomposed = decompose_text(message)
 
-    meaningful_tokens = set(extract_meaningful_tokens(message))
+    tokens = extract_meaningful_tokens(message)
+    token_set = set(tokens)
+    ngram_set = generate_ngrams(tokens)
+    meaningful_tokens = token_set | ngram_set  # 단어 + ngram 병합
+    # print(f"✅ 형태소 분석 결과: {meaningful_tokens}")
 
     # 1차: 원형 검사
     for _, (word, mode) in automaton.iter(message):

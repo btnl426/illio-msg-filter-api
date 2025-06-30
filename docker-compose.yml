@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: illio-mssql
+    ports:
+      - "14333:1433"
+    environment:
+      SA_PASSWORD: "Illio1234!"
+      ACCEPT_EULA: "Y"
+    networks:
+      - illio-net
+    healthcheck:
+      test: ["CMD-SHELL", "exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: paranha/illio-api:latest
+    container_name: illio-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+    environment:
+      DB_HOST: db
+      DB_PORT: 1433             
+      DB_USER: sa
+      DB_PASSWORD: Illio1234!
+      DB_NAME: safe_msg_pj_db
+      DB_DRIVER: ODBC Driver 17 for SQL Server 
+    networks:
+      - illio-net
+
+networks:
+  illio-net:

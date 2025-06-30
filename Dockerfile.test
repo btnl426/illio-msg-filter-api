@@ -1,0 +1,25 @@
+# 베이스 이미지
+FROM python:3.10-slim
+
+# 작업 디렉토리 설정
+WORKDIR /app
+
+# 필요한 파일 복사
+COPY test_db_connection.py /app
+
+# 필요한 패키지 설치
+RUN apt-get update && apt-get install -y \
+    gnupg2 \
+    curl \
+    unixodbc \
+    unixodbc-dev \
+ && apt-get remove -y libodbc2 libodbcinst2 unixodbc-common || true && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/11/prod bullseye main" > /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && \
+    ACCEPT_EULA=Y apt-get install -y msodbcsql17 && \
+    pip install pyodbc
+
+# 실행 명령
+CMD ["python", "test_db_connection.py"]

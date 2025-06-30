@@ -6,12 +6,12 @@ import ahocorasick
 from app.database import get_connection
 import app.state as state
 
-from konlpy.tag import Okt
-okt = Okt()
+# from konlpy.tag import Okt
+# okt = Okt()
 
 from konlpy.tag import Mecab
-# mecab = Mecab()
-mecab = Mecab(dicpath="/opt/homebrew/Cellar/mecab-ko-dic/2.1.1-20180720/lib/mecab/dic/mecab-ko-dic")
+mecab = Mecab()
+# mecab = Mecab(dicpath="/opt/homebrew/Cellar/mecab-ko-dic/2.1.1-20180720/lib/mecab/dic/mecab-ko-dic")
 
 exclude_for_jamo = set()
 

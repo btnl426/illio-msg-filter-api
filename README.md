@@ -1,3 +1,4 @@
+![image](https://github.com/user-attachments/assets/d341576e-e0a5-4b96-bf59-750b181c4a52)
 
 
 🗂️ 테이블 생성 스크립트 (MSSQL)

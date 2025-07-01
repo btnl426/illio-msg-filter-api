@@ -8,7 +8,6 @@ WORKDIR /app
 COPY . /app
 
 # 4. 시스템 패키지 설치
-# ✅ konlpy는 JVM(Java)을 필요로 하므로 openjdk-11-jdk 추가
 RUN apt-get update && apt-get install -y \
     default-jdk \
     build-essential \
@@ -29,25 +28,15 @@ RUN apt-get update && apt-get install -y \
     unixodbc-dev \
     wget
 
-# 5. MeCab 본체 설치 (압축 파일 이용)
-RUN cd /opt && \
-    tar -xzvf /app/mecab-ko.tar.gz && \
-    cd mecab-ko && \
-    ./configure --build=aarch64-unknown-linux-gnu && \
-    make && \
-    make install
-
-# 6. MeCab-Ko-Dic 설치
-RUN mkdir -p /usr/local/lib/mecab/dic/ && \
-    tar -xzvf /app/mecab-ko-dic.tar.gz -C /usr/local/lib/mecab/dic/ && \
-    ln -s /usr/local/lib/mecab/dic/mecab-ko-dic /usr/local/lib/mecab/dic/default
-
-# 7. Python 패키지 설치
+# 5. Python 패키지 및 gdown 설치
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt && \
-    pip install mecab-python3 konlpy
+    pip install mecab-python3 konlpy gdown
 
-# Microsoft ODBC 드라이버 설치 (충돌 방지 포함)
+# 6. 리소스 다운로드 및 설치 실행
+RUN chmod +x setup.sh && ./setup.sh
+
+# 7. Microsoft ODBC 드라이버 설치
 RUN apt-get remove -y libodbc2 libodbcinst2 unixodbc-common || true && \
     apt-get update && apt-get install -y gnupg2 && \
     mkdir -p /etc/apt/keyrings && \

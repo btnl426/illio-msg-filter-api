@@ -17,14 +17,30 @@ services:
       timeout: 5s
       retries: 5
 
+  db-init:
+    image: mcr.microsoft.com/mssql-tools
+    container_name: illio-db-init
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./init.sql:/init.sql
+    entrypoint: >
+      /bin/bash -c "
+        sleep 10;
+        /opt/mssql-tools/bin/sqlcmd -S db,1433 -U sa -P 'Illio1234!' -i /init.sql
+      "
+    networks:
+      - illio-net
+
   api:
     image: paranha/illio-api:latest
     container_name: illio-api
     ports:
       - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     restart: on-failure
     environment:
       DB_HOST: db
@@ -35,6 +51,8 @@ services:
       DB_DRIVER: ODBC Driver 17 for SQL Server 
     networks:
       - illio-net
+    env_file:
+      - .env
 
 networks:
   illio-net:

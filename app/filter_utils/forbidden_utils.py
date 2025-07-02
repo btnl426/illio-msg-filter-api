@@ -3,15 +3,12 @@
 import hgtk
 import time
 import ahocorasick
-from app.database import get_connection
+from app.database import db_session
 import app.state as state
 
-# from konlpy.tag import Okt
-# okt = Okt()
-
 from konlpy.tag import Mecab
-mecab = Mecab()
-# mecab = Mecab(dicpath="/opt/homebrew/Cellar/mecab-ko-dic/2.1.1-20180720/lib/mecab/dic/mecab-ko-dic")
+# mecab = Mecab()
+mecab = Mecab(dicpath="/opt/homebrew/Cellar/mecab-ko-dic/2.1.1-20180720/lib/mecab/dic/mecab-ko-dic")
 
 exclude_for_jamo = set()
 
@@ -25,50 +22,116 @@ def prepare_forbidden_entry(word: str) -> dict:
 def prepare_forbidden_entries(words: list[str]) -> list[dict]:
     return [{"word": word, "decomposed_word": decompose_text(word)} for word in words]
 
+def get_existing_words(words: list[str]) -> set[str]:
+    """금칙어 테이블에서 이미 등록된 단어 조회"""
+    if not words:
+        return set()
+
+    with db_session() as conn:
+        cursor = conn.cursor()
+        placeholders = ','.join('?' for _ in words)
+        cursor.execute(f"""
+            SELECT word FROM forbidden_words
+            WHERE word IN ({placeholders})
+        """, words)
+        return set(row[0] for row in cursor.fetchall())
+
+
+def register_forbidden_word(word: str) -> dict:
+    """금칙어 등록 함수 (단일)"""
+    existing_words = get_existing_words([word])
+    if word in existing_words:
+        return {"created": False, "word": word}
+
+    entry = prepare_forbidden_entry(word)
+
+    with db_session() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO forbidden_words (word, decomposed_word)
+            VALUES (?, ?)
+        """, (entry["word"], entry["decomposed_word"]))
+
+        # 커밋은 db_session 내부에서 자동 수행
+        add_to_automaton(entry["word"], entry["decomposed_word"])
+
+        return {
+            "created": True,
+            "word": word,
+            "decomposed_word": entry["decomposed_word"]
+        }
+        
+
+def insert_bulk_forbidden_words(words: list[str]) -> dict:
+    """
+    여러 금칙어를 DB에 일괄 등록하고 트라이에 반영
+    """
+    existing_words = get_existing_words(words)
+    filtered_words = [word for word in words if word not in existing_words]
+    entries = prepare_forbidden_entries(filtered_words)
+
+    registered = []
+    failed = []
+
+    with db_session() as conn:
+        cursor = conn.cursor()
+        for entry in entries:
+            try:
+                cursor.execute("""
+                    INSERT INTO forbidden_words (word, decomposed_word)
+                    VALUES (?, ?)
+                """, (entry["word"], entry["decomposed_word"]))
+                add_to_automaton(entry["word"], entry["decomposed_word"])
+                registered.append(entry["word"])
+            except Exception as e:
+                print(f"❌ '{entry['word']}' 등록 실패: {e}")
+                failed.append(entry["word"])
+                continue
+
+    return {
+        "registered": registered,
+        "skipped": list(existing_words),
+        "failed": failed
+    }
+
+
 def load_automaton_from_db() -> ahocorasick.Automaton | None:
     """DB에서 금칙어 로딩하여 트라이 생성"""
     automaton = ahocorasick.Automaton()
     inserted_words = set()
-    unique_original_words = set()   # 실제 등록된 원형 단어만 따로 저장
-
-    conn = None
+    unique_original_words = set()  # 실제 등록된 원형 단어만 따로 저장
 
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT word, decomposed_word FROM forbidden_words")
-        rows = cursor.fetchall()
+        with db_session() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT word, decomposed_word FROM forbidden_words")
+            rows = cursor.fetchall()
 
-        if not rows:
-            print("⚠️ [주의] 금칙어가 DB에 등록되어 있지 않습니다.")
-            return None
+            if not rows:
+                print("⚠️ [주의] 금칙어가 DB에 등록되어 있지 않습니다.")
+                return None
 
-        for word, decomposed in rows:
-            if word and word not in inserted_words:
-                automaton.add_word(word, (word, "original"))
-                inserted_words.add(word)
-                unique_original_words.add(word)
+            for word, decomposed in rows:
+                if word and word not in inserted_words:
+                    automaton.add_word(word, (word, "original"))
+                    inserted_words.add(word)
+                    unique_original_words.add(word)
 
-            if decomposed and word not in exclude_for_jamo:
-                jamo = decomposed.replace(" ", "")
-                if len(jamo) >= 3 and jamo not in inserted_words:
-                    automaton.add_word(jamo, (word, "decomposed"))
-                    inserted_words.add(jamo)
+                if decomposed and word not in exclude_for_jamo:
+                    jamo = decomposed.replace(" ", "")
+                    if len(jamo) >= 3 and jamo not in inserted_words:
+                        automaton.add_word(jamo, (word, "decomposed"))
+                        inserted_words.add(jamo)
 
         automaton.make_automaton()
         state.forbidden_automaton = automaton  # ✅ 전역 상태에 직접 할당
 
-        # print(f"✅ 총 {len(unique_original_words)}개의 금칙어가 등록되었습니다.")
         print(f"✅ 원형 {len(unique_original_words)}개, 자모 {len(inserted_words - unique_original_words)}개 등록 완료")
         return automaton
 
     except Exception as e:
         print(f"[❌ ERROR] 금칙어 불러오기 실패: {e}")
         return None
-
-    finally:
-        if conn:
-            conn.close()
 
 
 def add_to_automaton(word: str, decomposed: str):
@@ -132,7 +195,7 @@ def check_forbidden_message(message: str) -> dict:
                 "result": "🚫 금칙어 포함",
                 "detected_words": [word],
                 "method": "원형",
-                "elapsed": round(elapsed, 4)
+                "inference_time": round(elapsed, 4)
             }
 
     # 2차: 자모 검사
@@ -144,7 +207,7 @@ def check_forbidden_message(message: str) -> dict:
                 "result": "🚫 금칙어 포함",
                 "detected_words": [word],
                 "method": "자모",
-                "elapsed": round(elapsed, 4)
+                "inference_time": round(elapsed, 4)
             }
 
     # 통과
@@ -154,23 +217,48 @@ def check_forbidden_message(message: str) -> dict:
         "result": "✅ 통과",
         "detected_words": [],
         "method": "-",
-        "elapsed": round(elapsed, 4)
+        "inference_time": round(elapsed, 4)
     }
+
+
+def get_all_forbidden_words() -> list[dict]:
+    """
+    금칙어 전체 조회
+    """
+    with db_session() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT word, decomposed_word, created_at FROM forbidden_words")
+        rows = cursor.fetchall()
+        return [
+            {
+                "word": row[0],
+                "decomposed_word": row[1],
+                "created_at": row[2]
+            }
+            for row in rows
+        ]
+        
+def is_forbidden_word(word: str) -> bool:
+    """
+    특정 단어가 금칙어 테이블에 존재하는지 여부 반환
+    """
+    with db_session() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM forbidden_words WHERE word = ?", (word,))
+        count = cursor.fetchone()[0]
+        return count > 0
     
     
 def delete_forbidden_word(word: str) -> bool:
-    conn = get_connection()
-    cursor = conn.cursor()
-
+    """
+    특정 금칙어를 DB에서 삭제
+    """
     try:
-        cursor.execute("DELETE FROM forbidden_words WHERE word = ?", (word,))
-        conn.commit()
-        return cursor.rowcount > 0  # 삭제된 행이 있으면 True
-
+        with db_session() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM forbidden_words WHERE word = ?", (word,))
+            return cursor.rowcount > 0  # 삭제된 행이 있으면 True
     except Exception as e:
-        conn.rollback()
         print("❌ 삭제 에러:", e)
         return False
-
-    finally:
-        conn.close()
+        

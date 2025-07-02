@@ -1,151 +1,131 @@
 from fastapi import APIRouter
-from app.database import get_connection
+from app.schemas.common import StandardResponse, StatusEnum
 from app.filter_utils.forbidden_utils import (
-    prepare_forbidden_entry, 
-    prepare_forbidden_entries,
-    add_to_automaton,
+    register_forbidden_word,
+    insert_bulk_forbidden_words,
     check_forbidden_message,
-    delete_forbidden_word
+    delete_forbidden_word,
+    get_all_forbidden_words,
+    is_forbidden_word
 )
 from app.schemas.forbidden_schema import (
     ForbiddenWord, 
     ForbiddenWordList,
+    ForbiddenCheckResult,
     MessageInput
 )
 
 router = APIRouter()
 
-@router.post("")
+@router.post("", response_model=StandardResponse)
 def register_forbidden(data: ForbiddenWord):
     try:
-        conn = get_connection()
-        existing_words = get_existing_words(conn, [data.word])
-        if data.word in existing_words:
-            return {
-                "message": "이미 등록된 금칙어입니다.",
-                "word": data.word
-            }
+        result = register_forbidden_word(data.word)
 
-        entry = prepare_forbidden_entry(data.word)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO forbidden_words (word, decomposed_word)
-            VALUES (?, ?)
-        """, (entry["word"], entry["decomposed_word"]))
-        conn.commit()
-        
-        # 실시간 트라이 등록
-        add_to_automaton(entry["word"], entry["decomposed_word"])
-
-        return {"message": "금칙어가 등록되었습니다.", "data": entry}
+        if result.get("created"):
+            return StandardResponse(
+                status=StatusEnum.SUCCESS,
+                message="금칙어가 등록되었습니다.",
+                data=result
+            )
+        else:
+            return StandardResponse(
+                status=StatusEnum.ALREADY_EXISTS,
+                message="이미 등록된 금칙어입니다.",
+                data={"word": data.word}
+            )
 
     except Exception as e:
-        return {"error": "DB 오류 발생", "detail": str(e)}
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="금칙어 등록 중 오류가 발생했습니다.",
+            data={"error": str(e)}
+        )
 
-    finally:
-        conn.close()
-
-
-@router.post("/bulk")
+@router.post("/bulk", response_model=StandardResponse)
 def register_forbidden_bulk(data: ForbiddenWordList):
     try:
-        conn = get_connection()
-        existing_words = get_existing_words(conn, data.words)
-        filtered_words = [word for word in data.words if word not in existing_words]
-        entries = prepare_forbidden_entries(filtered_words)
+        result = insert_bulk_forbidden_words(data.words)
 
-        cursor = conn.cursor()
-        registered = []
-        failed = []
-
-        for entry in entries:
-            try:
-                cursor.execute("""
-                    INSERT INTO forbidden_words (word, decomposed_word)
-                    VALUES (?, ?)
-                """, (entry["word"], entry["decomposed_word"]))
-                add_to_automaton(entry["word"], entry["decomposed_word"])
-                registered.append(entry["word"])
-            except Exception as e:
-                print(f"❌ '{entry['word']}' 등록 실패: {e}")
-                failed.append(entry["word"])
-                continue
-
-        conn.commit()
-
-        return {
-            "message": f"{len(registered)}개의 금칙어가 등록되었습니다.",
-            "registered": registered,
-            "skipped": list(existing_words),
-            "failed": failed
-        }
+        message = f"{len(result['registered'])}개의 금칙어가 등록되었습니다."
+        return StandardResponse(
+            status=StatusEnum.SUCCESS,
+            message=message,
+            data=result
+        )
 
     except Exception as e:
-        return {"error": "DB 오류 발생", "detail": str(e)}
-
-    finally:
-        if conn:
-            conn.close()
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="금칙어 등록 중 오류 발생",
+            data={"error": str(e)}
+        )
         
-@router.get("")
-def get_all_forbidden_words():
+@router.get("", response_model=StandardResponse)
+def fetch_all_forbidden_words():
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT word, decomposed_word, created_at FROM forbidden_words")
-        rows = cursor.fetchall()
-        result = [
-            {
-                "word": row[0],
-                "decomposed_word": row[1],
-                "created_at": row[2]
-            }
-            for row in rows
-        ]
-        return {"count": len(result), "data": result}
+        result = get_all_forbidden_words()
+        return StandardResponse(
+            status=StatusEnum.SUCCESS,
+            message="금칙어 전체 조회 성공",
+            data={"count": len(result), "forbidden_words": result}
+        )
     except Exception as e:
-        return {"error": "DB 조회 중 오류 발생", "detail": str(e)}
-    finally:
-        conn.close()
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="금칙어 조회 중 오류 발생",
+            data={"error": str(e)}
+        )
         
-@router.get("/check/{word}")
+        
+@router.get("/check/{word}", response_model=StandardResponse)
 def check_forbidden_word(word: str):
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM forbidden_words WHERE word = ?", (word,))
-        count = cursor.fetchone()[0]
-        return {
-            "word": word,
-            "is_forbidden": count > 0
-        }
+        is_forbidden = is_forbidden_word(word)
+        return StandardResponse(
+            status=StatusEnum.SUCCESS,
+            message="금칙어 여부 확인 완료",
+            data={"word": word, "is_forbidden": is_forbidden}
+        )
     except Exception as e:
-        return {"error": "DB 조회 중 오류 발생", "detail": str(e)}
-    finally:
-        conn.close()
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="금칙어 여부 확인 중 오류 발생",
+            data={"error": str(e)}
+        )
 
-
-def get_existing_words(conn, words: list[str]) -> set[str]:
-    if not words:
-        return set()
-    placeholders = ','.join('?' for _ in words)
-    cursor = conn.cursor()
-    cursor.execute(f"""
-        SELECT word FROM forbidden_words
-        WHERE word IN ({placeholders})
-    """, words)
-    return set(row[0] for row in cursor.fetchall())
-
-
-@router.post("/check-message")
+@router.post("/check-message", response_model=StandardResponse)
 def check_message(data: MessageInput):
-    return check_forbidden_message(data.message)
+    result = check_forbidden_message(data.message)
+    
+    return StandardResponse(
+        status=StatusEnum.SUCCESS,
+        message="금칙어 검사 완료",
+        detected=bool(result["detected_words"]),
+        data=ForbiddenCheckResult(**result)
+    )
 
-
-@router.delete("/{word}")
+@router.delete("/{word}", response_model=StandardResponse)
 def remove_forbidden_word(word: str):
-    success = delete_forbidden_word(word)
-    if success:
-        return {"status": "success", "message": f"'{word}' 삭제 완료"}
-    else:
-        return {"status": "failed", "message": f"'{word}' 삭제 실패 또는 존재하지 않음"}
+    try:
+        success = delete_forbidden_word(word)
+
+        if success:
+            return StandardResponse(
+                status=StatusEnum.SUCCESS,
+                message=f"'{word}' 삭제 완료",
+                data={"deleted_word": word}
+            )
+        else:
+            return StandardResponse(
+                status=StatusEnum.NOT_FOUND,
+                message=f"'{word}' 삭제 실패 또는 존재하지 않음",
+                data=None
+            )
+
+    except Exception as e:
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="금칙어 삭제 중 오류 발생",
+            data={"error": str(e)}
+        )

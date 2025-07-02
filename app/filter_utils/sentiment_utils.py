@@ -3,13 +3,9 @@ import torch
 import time
 import os
 
-# 모델 경로 
 sentiment_model_path = os.getenv("SENTIMENT_MODEL_PATH")
-
-# 모델과 토크나이저 로드
 tokenizer = AutoTokenizer.from_pretrained(sentiment_model_path)
 model = AutoModelForSequenceClassification.from_pretrained(sentiment_model_path)
-
 
 def predict_sentiment(text: str) -> dict:
     start_time = time.time()
@@ -28,5 +24,5 @@ def predict_sentiment(text: str) -> dict:
     return {
         "label": "positive" if predicted_class_id == 1 else "negative",
         "confidence": confidence,
-        "elapsed": elapsed_time
+        "inference_time": elapsed_time
     }

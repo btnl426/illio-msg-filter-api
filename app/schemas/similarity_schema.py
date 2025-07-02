@@ -8,9 +8,9 @@ class SensitiveWordRequest(BaseModel):
 class SimilarityCheckRequest(BaseModel):
     user_id: str
     message: str
+    threshold: float = 0.8 
     
-class SimilarityCheckResponse(BaseModel):
-    status: str
+class SimilarityResult(BaseModel):
     max_similarity: float
     most_similar_word: str
     threshold: float

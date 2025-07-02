@@ -1,6 +1,7 @@
 # app/database.py
 
 import pyodbc
+from contextlib import contextmanager
 from app.config import DB_CONFIG
 
 def get_connection():
@@ -17,6 +18,19 @@ def get_connection():
     except Exception as e:
         print("❌ DB 연결 실패:", e)
         raise
+    
+# ✅ 커넥션 컨텍스트 매니저
+@contextmanager
+def db_session():
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     
 if __name__ == "__main__":
     print("🔍 DB 연결 테스트 시작")

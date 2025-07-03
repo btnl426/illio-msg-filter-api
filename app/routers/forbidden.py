@@ -5,6 +5,7 @@ from app.filter_utils.forbidden_utils import (
     insert_bulk_forbidden_words,
     check_forbidden_message,
     delete_forbidden_word,
+    delete_forbidden_words_by_date,
     get_all_forbidden_words,
     is_forbidden_word
 )
@@ -127,5 +128,37 @@ def remove_forbidden_word(word: str):
         return StandardResponse(
             status=StatusEnum.ERROR,
             message="금칙어 삭제 중 오류 발생",
+            data={"error": str(e)}
+        )
+
+# 날짜별 금칙어 삭제 엔드포인트(date_str 예시 : 2025-07-03)
+@router.delete("/by-date/{date_str}", response_model=StandardResponse)
+def remove_forbidden_words_by_date(date_str: str):
+    try:
+        deleted_count = delete_forbidden_words_by_date(date_str)
+
+        if deleted_count > 0:
+            return StandardResponse(
+                status=StatusEnum.SUCCESS,
+                message=f"{date_str} 등록 금칙어 {deleted_count}개 삭제 완료",
+                data={"deleted_count": deleted_count}
+            )
+        elif deleted_count == 0:
+            return StandardResponse(
+                status=StatusEnum.NOT_FOUND,
+                message=f"{date_str} 등록된 금칙어가 없습니다.",
+                data=None
+            )
+        else:
+            return StandardResponse(
+                status=StatusEnum.ERROR,
+                message=f"{date_str} 삭제 중 오류 발생",
+                data=None
+            )
+
+    except Exception as e:
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="금칙어 삭제 중 예외 발생",
             data={"error": str(e)}
         )

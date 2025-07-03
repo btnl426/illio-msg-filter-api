@@ -4,8 +4,9 @@ import torch
 import time
 import os
 
-from datetime import datetime
-from app.database import get_connection, db_session
+from app.database import db_session
+from db_models.similarity import SensitiveWord, UserSensitiveWord
+
 from scipy.spatial.distance import cdist
 from transformers import AutoTokenizer, AutoModel
 
@@ -27,43 +28,38 @@ def get_sentence_embedding(model, tokenizer, sentence):
     return embeddings.squeeze().numpy()
 
 def insert_sensitive_word(user_id: str, sentence: str):
-    created = False  # 👉 새로 생성 여부 플래그
+    created = False
 
-    with db_session() as conn:
-        cursor = conn.cursor()
-
+    with db_session() as session:
         # 1. 단어 존재 확인
-        cursor.execute(
-            "SELECT word_id FROM sensitive_words WHERE word = ? AND model_name = ?",
-            (sentence, model_name)
-        )
-        row = cursor.fetchone()
+        existing_word = session.query(SensitiveWord).filter_by(
+            word=sentence,
+            model_name=model.name_or_path  # 혹은 고정된 model_name 값
+        ).first()
 
-        if row:
-            word_id = row.word_id
+        if existing_word:
+            word_id = existing_word.word_id
         else:
             embedding = get_sentence_embedding(model, tokenizer, sentence)
-            # 2. 없으면 등록
-            cursor.execute("""
-                INSERT INTO sensitive_words (word, embedding, model_name)
-                OUTPUT INSERTED.word_id
-                VALUES (?, ?, ?)
-            """, (sentence, embedding.tobytes(), model_name))
-            row = cursor.fetchone()
-            if not row or row[0] is None:
-                raise Exception("❌ word_id를 가져오지 못했습니다")
-            word_id = int(row[0])
+            new_word = SensitiveWord(
+                word=sentence,
+                embedding=embedding.tobytes(),
+                model_name=model.name_or_path  # 혹은 고정 문자열
+            )
+            session.add(new_word)
+            session.flush()  # word_id 가져오기 위해 flush
+            word_id = new_word.word_id
             created = True
 
-        # 3. 관계 테이블 중복 확인 및 삽입
-        cursor.execute("""
-            SELECT 1 FROM user_sensitive_words WHERE user_id = ? AND word_id = ?
-        """, (user_id, word_id))
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO user_sensitive_words (user_id, word_id)
-                VALUES (?, ?)
-            """, (user_id, word_id))
+        # 2. 관계 테이블 중복 확인 및 삽입
+        exists = session.query(UserSensitiveWord).filter_by(
+            user_id=user_id,
+            word_id=word_id
+        ).first()
+
+        if not exists:
+            link = UserSensitiveWord(user_id=user_id, word_id=word_id)
+            session.add(link)
 
         return {
             "word_id": word_id,
@@ -71,16 +67,18 @@ def insert_sensitive_word(user_id: str, sentence: str):
         }
         
 def get_sensitive_words_by_user(user_id: str) -> list[str]:
-    with db_session() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT sw.word
-            FROM sensitive_words sw
-            JOIN user_sensitive_words usw ON sw.word_id = usw.word_id
-            WHERE usw.user_id = ?
-        """, (user_id,))
-        rows = cursor.fetchall()
-        return [row.word for row in rows]
+    with db_session() as session:
+        results = (
+            session.query(SensitiveWord.word)
+            .join(UserSensitiveWord, SensitiveWord.word_id == UserSensitiveWord.word_id)
+            .filter(UserSensitiveWord.user_id == user_id)
+            .all()
+        )
+        words = [row[0] for row in results]
+        return {
+            "words": words,
+            "count": len(words)
+        }
 
 def compute_similarity(message_embedding: np.ndarray, embeddings: list[np.ndarray]) -> tuple[float, int]:
     """
@@ -94,29 +92,27 @@ def compute_similarity(message_embedding: np.ndarray, embeddings: list[np.ndarra
     return max_similarity, max_index
 
 def check_message_similarity(user_id: str, message: str, threshold: float):
-    with db_session() as conn:
-        cursor = conn.cursor()
+    with db_session() as session:  # SQLAlchemy 세션 사용
         start_time = time.time()
 
         # 1. 사용자 민감 단어 조회
-        cursor.execute("""
-            SELECT sw.word, sw.embedding
-            FROM sensitive_words sw
-            JOIN user_sensitive_words usw ON sw.word_id = usw.word_id
-            WHERE usw.user_id = ?
-        """, (user_id,))
-        rows = cursor.fetchall()
-        if not rows:
+        results = (
+            session.query(SensitiveWord.word, SensitiveWord.embedding)
+            .join(UserSensitiveWord, SensitiveWord.word_id == UserSensitiveWord.word_id)
+            .filter(UserSensitiveWord.user_id == user_id)
+            .all()
+        )
+        if not results:
             return None
 
         # 2. 단어 리스트, 임베딩 파싱
-        words = [row.word for row in rows]
-        embeddings = [np.frombuffer(row.embedding, dtype=np.float32) for row in rows]
+        words = [row[0] for row in results]
+        embeddings = [np.frombuffer(row[1], dtype=np.float32) for row in results]
 
         # 3. 입력 메시지 임베딩
         message_embedding = get_sentence_embedding(model, tokenizer, message).reshape(1, -1)
 
-        # 4. 유사도 계산 → 별도 함수 사용
+        # 4. 유사도 계산
         max_similarity, max_index = compute_similarity(message_embedding, embeddings)
         most_similar_word = words[max_index]
         elapsed = time.time() - start_time
@@ -130,32 +126,69 @@ def check_message_similarity(user_id: str, message: str, threshold: float):
         }
         
 def remove_user_sensitive_word(user_id: str, sentence: str) -> dict:
-    with db_session() as conn:
-        cursor = conn.cursor()
-
+    with db_session() as session:
         try:
-            # word_id 조회
-            cursor.execute("SELECT word_id FROM sensitive_words WHERE word = ?", (sentence,))
-            row = cursor.fetchone()
-            if not row:
+            # 1. 민감 단어 조회
+            word_obj = session.query(SensitiveWord).filter_by(word=sentence).first()
+            if not word_obj:
                 return {"deleted": False, "reason": "not_found"}
 
-            word_id = row[0]
+            word_id = word_obj.word_id
 
-            # 관계 삭제
-            cursor.execute("""
-                DELETE FROM user_sensitive_words
-                WHERE user_id = ? AND word_id = ?
-            """, (user_id, word_id))
-            deleted = cursor.rowcount > 0
+            # 2. 관계 삭제
+            link = session.query(UserSensitiveWord).filter_by(user_id=user_id, word_id=word_id).first()
+            if not link:
+                return {"deleted": False, "reason": "not_registered"}
 
-            if deleted:
-                # 다른 유저가 쓰는지 확인하고 없으면 삭제
-                cursor.execute("SELECT COUNT(*) FROM user_sensitive_words WHERE word_id = ?", (word_id,))
-                if cursor.fetchone()[0] == 0:
-                    cursor.execute("DELETE FROM sensitive_words WHERE word_id = ?", (word_id,))
+            session.delete(link)
+            session.commit()  # 커밋해야 rowcount 반영됨
 
-            return {"deleted": deleted, "word": sentence}
+            # 3. 다른 유저가 사용하는지 확인
+            count = session.query(UserSensitiveWord).filter_by(word_id=word_id).count()
+            if count == 0:
+                session.delete(word_obj)
+                session.commit()
+
+            return {"deleted": True, "word": sentence}
 
         except Exception as e:
+            session.rollback()
+            return {"deleted": False, "reason": str(e)}
+        
+        
+        
+def remove_all_user_sensitive_words(user_id: str) -> dict:
+    with db_session() as session:
+        try:
+            # 1. 유저가 등록한 모든 링크 조회
+            links = session.query(UserSensitiveWord).filter_by(user_id=user_id).all()
+            if not links:
+                return {"deleted": False, "reason": "no_words"}
+
+            deleted_words = []
+
+            for link in links:
+                word_id = link.word_id
+                word_obj = session.query(SensitiveWord).filter_by(word_id=word_id).first()
+
+                # 링크 삭제
+                session.delete(link)
+
+                # 단어가 다른 유저에게 사용되는지 확인
+                remaining_links = session.query(UserSensitiveWord).filter_by(word_id=word_id).count()
+                if remaining_links == 0 and word_obj:
+                    session.delete(word_obj)
+
+                if word_obj:
+                    deleted_words.append(word_obj.word)
+
+            session.commit()
+            return {
+                "deleted": True, 
+                "words": deleted_words,
+                "count": len(deleted_words)
+            }
+
+        except Exception as e:
+            session.rollback()
             return {"deleted": False, "reason": str(e)}

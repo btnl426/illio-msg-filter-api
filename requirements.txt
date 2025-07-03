@@ -12,3 +12,4 @@ mecab-python3
 transformers==4.41.2
 torch==2.3.0
 scipy
+sqlalchemy

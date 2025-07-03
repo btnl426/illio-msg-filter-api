@@ -16,3 +16,6 @@ class SimilarityResult(BaseModel):
     threshold: float
     match: bool
     inference_time: float
+    
+class UserIdRequest(BaseModel):
+    user_id: str

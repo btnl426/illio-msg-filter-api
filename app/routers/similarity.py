@@ -4,13 +4,15 @@ from app.schemas.common import StandardResponse, StatusEnum
 from app.schemas.similarity_schema import (
     SensitiveWordRequest,
     SimilarityCheckRequest,
+    UserIdRequest,
     SimilarityResult
 )
 from app.filter_utils.similarity_utils import (
     insert_sensitive_word,
     get_sensitive_words_by_user,
     check_message_similarity,
-    remove_user_sensitive_word
+    remove_user_sensitive_word,
+    remove_all_user_sensitive_words
 )
 
 router = APIRouter()
@@ -33,12 +35,16 @@ def register_sensitive_word(request: SensitiveWordRequest):
     
 @router.get("/sensitive-words/{user_id}", response_model=StandardResponse)
 def get_user_sensitive_words(user_id: str):
-    words = get_sensitive_words_by_user(user_id)
+    result = get_sensitive_words_by_user(user_id)
 
     return StandardResponse(
         status=StatusEnum.SUCCESS,
-        message="민감 단어 목록 조회 성공" if words else "등록된 민감 단어가 없습니다.",
-        data={"user_id": user_id, "sensitive_words": words}
+        message="민감 단어 목록 조회 성공" if result["count"] > 0 else "등록된 민감 단어가 없습니다.",
+        data={
+            "user_id": user_id,
+            "sensitive_words": result["words"],
+            "words_count": result["count"]
+        }
     )
 
 
@@ -86,5 +92,31 @@ def delete_sensitive_word(request: SensitiveWordRequest):
         return StandardResponse(
             status=StatusEnum.ERROR,
             message="민감 단어 삭제 중 오류 발생",
+            data={"error": result.get("reason")}
+        )
+        
+@router.delete("/sensitive-word/all", response_model=StandardResponse)
+def delete_all_sensitive_words(request: UserIdRequest):
+    result = remove_all_user_sensitive_words(request.user_id)
+
+    if result["deleted"]:
+        return StandardResponse(
+            status=StatusEnum.SUCCESS,
+            message=f"{request.user_id}의 민감 단어 전체 삭제 완료",
+            data={
+                "deleted_words": result["words"],
+                "deleted_count": result["count"]
+            }
+        )
+    elif result.get("reason") == "no_words":
+        return StandardResponse(
+            status=StatusEnum.NOT_FOUND,
+            message="해당 유저의 민감 단어가 없습니다.",
+            data=None
+        )
+    else:
+        return StandardResponse(
+            status=StatusEnum.ERROR,
+            message="민감 단어 전체 삭제 중 오류 발생",
             data={"error": result.get("reason")}
         )

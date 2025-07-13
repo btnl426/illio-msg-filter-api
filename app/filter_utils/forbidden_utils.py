@@ -216,12 +216,12 @@ def check_forbidden_message(message: str) -> dict:
     """메시지 한 개에 대해 금칙어 포함 여부 검사 (형태소 기반 단어만 검사)"""
     start_time = time.time()
     automaton = state.forbidden_automaton
-    decomposed = decompose_text(message)
+    # decomposed = decompose_text(message)
 
     tokens = extract_meaningful_tokens(message)
     token_set = set(tokens)
-    ngram_set = generate_ngrams(tokens)
-    meaningful_tokens = token_set | ngram_set  # 단어 + ngram 병합
+    meaningful_tokens = token_set
+    # meaningful_tokens = token_set | ngram_set  # 단어 + ngram 병합
     # print(f"✅ 형태소 분석 결과: {meaningful_tokens}")
 
     # 1차: 원형 검사
@@ -237,7 +237,8 @@ def check_forbidden_message(message: str) -> dict:
             }
 
     # 2차: 자모 검사
-    for _, (word, mode) in automaton.iter(decomposed):
+    # for _, (word, mode) in automaton.iter(decomposed):
+    for _, (word, mode) in automaton.iter(message):
         if mode == "decomposed" and word in meaningful_tokens:
             elapsed = time.time() - start_time
             return {

@@ -220,6 +220,7 @@ def check_forbidden_message(message: str) -> dict:
 
     tokens = extract_meaningful_tokens(message)
     token_set = set(tokens)
+    # ngram_set = generate_ngrams(tokens)
     meaningful_tokens = token_set
     # meaningful_tokens = token_set | ngram_set  # 단어 + ngram 병합
     # print(f"✅ 형태소 분석 결과: {meaningful_tokens}")
